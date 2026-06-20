@@ -22,7 +22,7 @@ from prompts import REPORT_PROMPT
 
 ROOT = Path(__file__).resolve().parent
 STATIC_DIR = ROOT / "static"
-API_KEY_FILE = ROOT / "deepseek_api_key.txt"
+API_KEY_FILES = (ROOT / "deepseek_api_key.txt", ROOT.parent / "deepseek_api_key.txt")
 DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 LOCAL_MODEL = os.environ.get("LOCAL_STEERING_MODEL", "qwen2.5:1.5b")
@@ -47,9 +47,10 @@ def _json_response(handler, payload, status=200):
 
 
 def _read_api_key():
-    if not API_KEY_FILE.exists():
-        raise RuntimeError("deepseek_api_key.txt was not found beside server.py")
-    key = API_KEY_FILE.read_text(encoding="utf-8").strip()
+    api_key_file = next((path for path in API_KEY_FILES if path.exists()), None)
+    if api_key_file is None:
+        raise RuntimeError("deepseek_api_key.txt was not found in steerandreport or the repository root")
+    key = api_key_file.read_text(encoding="utf-8").strip()
     if not key:
         raise RuntimeError("deepseek_api_key.txt is empty")
     return key
