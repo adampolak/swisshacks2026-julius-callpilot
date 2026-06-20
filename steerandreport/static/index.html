@@ -15,10 +15,6 @@
       </div>
       <a class="brand-wordmark" href="/" aria-label="Julius Bar home">Julius Bär</a>
       <div class="top-actions">
-        <label class="mode-toggle">
-          <span>DeepSeek route</span>
-          <input id="modeToggle" type="checkbox" />
-        </label>
         <button id="simulateBtn" class="button button-secondary" type="button">Start call</button>
         <button id="runBtn" class="button button-primary" type="button">Open report</button>
       </div>
@@ -83,15 +79,15 @@
 
         <dl id="clmGrid" class="wealth-grid"></dl>
 
-        <div class="dossier-tabs" role="tablist" aria-label="Client context views">
-          <button class="dossier-tab active" data-view="portfolio" role="tab" aria-selected="true" type="button">Portfolio</button>
-          <button class="dossier-tab" data-view="family" role="tab" aria-selected="false" type="button">Family</button>
-          <button class="dossier-tab" data-view="commitments" role="tab" aria-selected="false" type="button">Open items</button>
+        <div class="dossier-tabs" role="tablist" aria-label="Knowledge sources">
+          <button class="dossier-tab" data-view="bank_api" role="tab" aria-selected="false" type="button">Bank API</button>
+          <button class="dossier-tab" data-view="news_api" role="tab" aria-selected="false" type="button">News API</button>
+          <button class="dossier-tab active" data-view="clm" role="tab" aria-selected="true" type="button">CLM</button>
         </div>
 
-        <section class="context-view" aria-live="polite">
-          <p id="contextLabel" class="meta-label">Portfolio signals</p>
-          <ul id="contextList" class="context-list"></ul>
+        <section id="contextView" class="context-view" aria-live="polite">
+          <div id="contextSourceHeader" class="source-header"></div>
+          <div id="contextContent" class="source-content"></div>
         </section>
 
         <div class="dossier-boundary">

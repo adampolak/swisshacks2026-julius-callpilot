@@ -11,6 +11,9 @@ const state = {
   guidanceSwapTimer: null,
   guidanceTransitionTimer: null,
   guidanceTransitioning: false,
+  activeContextView: "clm",
+  sourcePanels: { bank_api: null, news_api: null },
+  contextHighlights: { bank_api: [], news_api: [], clm: [] },
 };
 
 const MIN_GUIDANCE_MS = 10000;
@@ -20,8 +23,9 @@ const els = {
   clmGrid: document.querySelector("#clmGrid"),
   clientTitle: document.querySelector("#client-title"),
   rmName: document.querySelector("#rmName"),
-  contextLabel: document.querySelector("#contextLabel"),
-  contextList: document.querySelector("#contextList"),
+  contextView: document.querySelector("#contextView"),
+  contextSourceHeader: document.querySelector("#contextSourceHeader"),
+  contextContent: document.querySelector("#contextContent"),
   hardBoundary: document.querySelector("#hardBoundary"),
   transcript: document.querySelector("#transcript"),
   guidance: document.querySelector("#guidance"),
@@ -29,7 +33,6 @@ const els = {
   latencyBadge: document.querySelector("#latencyBadge"),
   runBtn: document.querySelector("#runBtn"),
   simulateBtn: document.querySelector("#simulateBtn"),
-  modeToggle: document.querySelector("#modeToggle"),
   modelLine: document.querySelector("#modelLine"),
   streamStatus: document.querySelector("#streamStatus"),
   turnCounter: document.querySelector("#turnCounter"),
@@ -41,6 +44,155 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function highlightText(value, terms = []) {
+  const text = String(value ?? "");
+  const validTerms = terms.filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!validTerms.length) return escapeHtml(text);
+  const pattern = new RegExp(`(${validTerms.map(escapeRegex).join("|")})`, "gi");
+  return text
+    .split(pattern)
+    .map((part, index) => (index % 2 ? `<mark>${escapeHtml(part)}</mark>` : escapeHtml(part)))
+    .join("");
+}
+
+function hasHighlight(value, terms = []) {
+  const text = String(value ?? "").toLowerCase();
+  return terms.some((term) => term && text.includes(String(term).toLowerCase()));
+}
+
+function cleanMarkdown(value) {
+  return String(value ?? "").replaceAll("**", "").replaceAll("`", "").replaceAll("*", "").trim();
+}
+
+function renderClmDocument(markdown, highlights) {
+  const lines = String(markdown || "").split(/\r?\n/);
+  return lines
+    .map((rawLine) => {
+      const line = rawLine.trim();
+      if (!line || /^-{3,}$/.test(line) || /^\|?\s*[-:]+(?:\s*\|\s*[-:]+)+\s*\|?$/.test(line)) return "";
+
+      const heading = line.match(/^(#{1,3})\s+(.+)$/);
+      if (heading) {
+        const level = heading[1].length === 1 ? "h3" : "h4";
+        const text = cleanMarkdown(heading[2]);
+        return `<${level} class="${hasHighlight(text, highlights) ? "is-match" : ""}">${highlightText(text, highlights)}</${level}>`;
+      }
+
+      if (line.startsWith("|")) {
+        const cells = line
+          .slice(1, line.endsWith("|") ? -1 : undefined)
+          .split("|")
+          .map((cell) => {
+            const text = cleanMarkdown(cell);
+            return `<span class="${hasHighlight(text, highlights) ? "is-match" : ""}">${highlightText(text, highlights)}</span>`;
+          })
+          .join("");
+        return `<div class="clm-table-row">${cells}</div>`;
+      }
+
+      const quote = line.match(/^>\s*(.+)$/);
+      if (quote) {
+        const text = cleanMarkdown(quote[1]);
+        return `<p class="clm-note ${hasHighlight(text, highlights) ? "is-match" : ""}">${highlightText(text, highlights)}</p>`;
+      }
+
+      const listItem = line.match(/^(?:[-+]\s+|\d+\.\s+)(.+)$/);
+      if (listItem) {
+        const text = cleanMarkdown(listItem[1]);
+        return `<p class="source-line ${hasHighlight(text, highlights) ? "is-match" : ""}">${highlightText(text, highlights)}</p>`;
+      }
+
+      const text = cleanMarkdown(line);
+      return `<p class="${hasHighlight(text, highlights) ? "is-match" : ""}">${highlightText(text, highlights)}</p>`;
+    })
+    .join("");
+}
+
+function setActiveTab(view) {
+  document.querySelectorAll(".dossier-tab").forEach((tab) => {
+    const active = tab.dataset.view === view;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+}
+
+function renderEmptySource(view) {
+  const label = view === "bank_api" ? "Bank API" : "News API";
+  els.contextSourceHeader.innerHTML = `
+    <div>
+      <p class="meta-label">${label}</p>
+      <h3>Awaiting a relevant question</h3>
+    </div>
+    <span class="source-state">Standby</span>
+  `;
+  els.contextContent.innerHTML = `<p class="source-empty">Relevant internal knowledge will appear here when the client asks a detailed question.</p>`;
+}
+
+function renderContext(view, highlights = state.contextHighlights[view] || []) {
+  state.activeContextView = view;
+  state.contextHighlights[view] = highlights;
+  setActiveTab(view);
+  els.contextView.scrollTop = 0;
+
+  if (view === "clm") {
+    els.contextSourceHeader.innerHTML = `
+      <div>
+        <p class="meta-label">Client lifecycle management</p>
+        <h3>Complete client record</h3>
+      </div>
+      <span class="source-state">Verified</span>
+    `;
+    els.contextContent.innerHTML = `<div class="clm-document">${renderClmDocument(state.clmProfile?.profile_markdown, highlights)}</div>`;
+    requestAnimationFrame(() => els.contextView.querySelector("mark")?.scrollIntoView({ block: "center" }));
+    return;
+  }
+
+  const source = state.sourcePanels[view];
+  if (!source) {
+    renderEmptySource(view);
+    return;
+  }
+
+  els.contextSourceHeader.innerHTML = `
+    <div>
+      <p class="meta-label">${escapeHtml(source.label)}</p>
+      <h3>${escapeHtml(source.title)}</h3>
+    </div>
+    <span class="source-state">${escapeHtml(source.status)}</span>
+  `;
+  els.contextContent.innerHTML = `
+    <div class="source-query">
+      <span class="meta-label">Retrieval</span>
+      <p>${highlightText(source.query, highlights)}</p>
+    </div>
+    <div class="source-items">
+      ${(source.items || [])
+        .map(
+          (item) => `
+            <article class="source-item ${hasHighlight(`${item.title} ${item.text}`, highlights) ? "is-match" : ""}">
+              <h4>${highlightText(item.title, highlights)}</h4>
+              <p>${highlightText(item.text, highlights)}</p>
+            </article>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+  requestAnimationFrame(() => els.contextView.querySelector("mark")?.scrollIntoView({ block: "center" }));
+}
+
+function updateKnowledgePanels(result) {
+  (result.knowledge_sources || []).forEach((source) => {
+    state.contextHighlights[source.type] = source.highlights || [];
+    if (source.type !== "clm") state.sourcePanels[source.type] = source;
+  });
+  if (result.active_source) renderContext(result.active_source);
 }
 
 function renderClm(profile) {
@@ -63,23 +215,7 @@ function renderClm(profile) {
       `,
     )
     .join("");
-  renderContext("portfolio");
-}
-
-function renderContext(view) {
-  const views = {
-    portfolio: ["Portfolio signals", state.clmProfile.portfolio_snapshot],
-    family: ["Family context", state.clmProfile.family_context],
-    commitments: ["Outstanding commitments", state.clmProfile.open_commitments],
-  };
-  const [label, items] = views[view];
-  els.contextLabel.textContent = label;
-  els.contextList.innerHTML = items.map((item) => `<li>${escapeHtml(item)}</li>`).join("");
-  document.querySelectorAll(".dossier-tab").forEach((tab) => {
-    const active = tab.dataset.view === view;
-    tab.classList.toggle("active", active);
-    tab.setAttribute("aria-selected", String(active));
-  });
+  renderContext("clm");
 }
 
 function updateSteeringStatus(result) {
@@ -89,21 +225,23 @@ function updateSteeringStatus(result) {
 
 function renderCueCards(result) {
   const cards = (result.cards || []).slice(0, 2);
+  updateKnowledgePanels(result);
   els.steeringEmpty.hidden = cards.length > 0;
   els.guidance.classList.toggle("has-cues", cards.length > 0);
   els.guidance.classList.remove("is-exiting");
   els.guidance.innerHTML = cards
-    .map(
-      (card, index) => `
+    .map((card, index) => {
+      const source = (card.sources || ["Conversation"]).join(" / ");
+      return `
         <article class="cue-card cue-${card.category.toLowerCase()}">
           <div class="cue-meta">
             <span>${escapeHtml(card.category)}</span>
-            <span>0${index + 1}</span>
+            <span class="cue-source">${escapeHtml(source)} · 0${index + 1}</span>
           </div>
           <p>${escapeHtml(card.text)}</p>
         </article>
-      `,
-    )
+      `;
+    })
     .join("");
   state.activeGuidanceShownAt = cards.length ? performance.now() : 0;
 }
@@ -137,7 +275,10 @@ function scheduleGuidanceSwap() {
 function renderSteering(result) {
   updateSteeringStatus(result);
   const cards = (result.cards || []).slice(0, 2);
-  if (!cards.length) return;
+  if (!cards.length) {
+    if (result.active_source) updateKnowledgePanels(result);
+    return;
+  }
 
   const next = { ...result, cards };
   if (!state.activeGuidanceShownAt && !state.guidanceTransitioning) {
@@ -176,7 +317,6 @@ async function analyzeTurn(turnIndex) {
       turns: state.transcript.slice(0, turnIndex + 1),
       latestTurnIndex: turnIndex,
       history: state.steeringHistory,
-      allowBigModel: els.modeToggle.checked,
     }),
   });
   const result = await response.json();
@@ -206,10 +346,13 @@ function resetStream() {
   state.steeringQueue = Promise.resolve();
   state.lastRenderedTurn = -1;
   state.currentTranscriptText = null;
+  state.sourcePanels = { bank_api: null, news_api: null };
+  state.contextHighlights = { bank_api: [], news_api: [], clm: [] };
   els.transcript.textContent = "";
   els.turnCounter.textContent = `0 / ${state.transcript.length}`;
   els.streamStatus.textContent = "Ready";
   renderIdle();
+  if (state.clmProfile) renderContext("clm");
 }
 
 function startTranscriptTurn(turnIndex) {

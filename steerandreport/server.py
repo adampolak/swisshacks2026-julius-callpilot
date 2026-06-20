@@ -70,16 +70,6 @@ def _call_deepseek_json(system_prompt, user_payload, temperature=0.2, max_tokens
     return json.loads(_deepseek_request(request_body))
 
 
-def _call_deepseek_text(messages, temperature=0.05, max_tokens=110):
-    request_body = {
-        "model": DEEPSEEK_MODEL,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "messages": messages,
-    }
-    return _deepseek_request(request_body)
-
-
 def _deepseek_request(request_body):
     request = urllib.request.Request(
         DEEPSEEK_URL,
@@ -178,7 +168,177 @@ def _selected_profile_facts(text):
     return facts[:4]
 
 
-def _conversation_messages(profile, turns, history):
+def _highlight_terms(text):
+    lower = text.lower()
+    candidates = (
+        "gold",
+        "nvidia",
+        "technology",
+        "semiconductor",
+        "sensoria",
+        "private credit",
+        "foundation",
+        "father",
+        "sister",
+        "estate",
+        "cross-border",
+        "american bank",
+        "regional bank",
+        "stefan",
+        "biotech",
+        "sophie",
+        "luca",
+        "lucca",
+    )
+    terms = [term for term in candidates if term in lower]
+    if any(term in lower for term in ("other place", "down south")):
+        terms.extend(["Holiday villa near Lucca", "bought in 2021"])
+    if any(term in lower for term in ("american bank", "nearly went under")):
+        terms.append("No exposure to US regional banks")
+    if "gold" in lower:
+        terms.append("Gold position")
+    return list(dict.fromkeys(terms))[:5]
+
+
+def _mock_bank_api(text):
+    lower = text.lower()
+    if "private credit" in lower:
+        return {
+            "type": "bank_api",
+            "label": "Bank API",
+            "title": "Private Markets Desk",
+            "status": "Internal knowledge retrieved",
+            "query": "Private credit eligibility, liquidity and governance",
+            "cue": "Before discussing private credit, confirm liquidity reserve, lock-up tolerance, fees, leverage and conflicts.",
+            "answer_terms": ["liquidity", "lock-up", "fees", "leverage", "conflicts"],
+            "items": [
+                {"title": "Policy PC-14", "text": "Confirm eligible-client classification, liquidity reserve, lock-up tolerance, fees, leverage and conflicts before discussing allocation."},
+                {"title": "Desk guidance", "text": "Use an education-first explanation and document why the structure remains understandable to the client and family decision-makers."},
+            ],
+            "highlights": ["lock-up tolerance", "fees", "liquidity reserve"],
+        }
+    if any(term in lower for term in ("estate", "father", "sister", "succession", "inherit", "cross-border")):
+        return {
+            "type": "bank_api",
+            "label": "Bank API",
+            "title": "Wealth Planning Desk",
+            "status": "Internal knowledge retrieved",
+            "query": "Cross-border succession planning",
+            "cue": "Frame this as discovery; map jurisdictions and documents, then coordinate qualified Swiss and Italian advisers.",
+            "answer_terms": ["discovery", "jurisdiction", "documents", "advisers"],
+            "items": [
+                {"title": "Planning protocol WP-08", "text": "Map residence, nationality, asset location, family decision-makers and existing legal documents before discussing structures."},
+                {"title": "Escalation", "text": "Coordinate qualified Swiss and Italian advisers; the RM should frame the next step as discovery, not legal or tax advice."},
+            ],
+            "highlights": ["asset location", "qualified Swiss and Italian advisers", "discovery"],
+        }
+    if "foundation" in lower or "philanthrop" in lower:
+        return {
+            "type": "bank_api",
+            "label": "Bank API",
+            "title": "Philanthropy Advisory",
+            "status": "Internal knowledge retrieved",
+            "query": "Art-education foundation discovery",
+            "cue": "Clarify purpose, beneficiaries, governance and family participation before discussing implementation options.",
+            "answer_terms": ["purpose", "beneficiaries", "governance", "participation"],
+            "items": [
+                {"title": "Discovery checklist", "text": "Clarify purpose, beneficiaries, governance, funding horizon, jurisdictions and family participation before considering implementation options."},
+                {"title": "Coordination", "text": "Keep philanthropy and succession as distinct workstreams even when the family wants one coordinated planning meeting."},
+            ],
+            "highlights": ["purpose", "governance", "distinct workstreams"],
+        }
+    if any(term in lower for term in ("allocation", "liquidity", "structured", "mandate", "concentration", "nvidia", "technology")):
+        return {
+            "type": "bank_api",
+            "label": "Bank API",
+            "title": "Investment Suitability Desk",
+            "status": "Internal knowledge retrieved",
+            "query": "Concentration and mandate assessment",
+            "cue": "Compare current exposure, mandate, loss capacity and liquidity commitments; answer with sizing scenarios.",
+            "answer_terms": ["exposure", "mandate", "loss capacity", "sizing"],
+            "items": [
+                {"title": "Suitability control IS-21", "text": "Compare the proposed position with current direct and thematic exposure, documented mandate, loss capacity and liquidity commitments."},
+                {"title": "RM framing", "text": "Use sizing scenarios and portfolio contribution rather than a generic diversification lecture."},
+            ],
+            "highlights": ["current direct and thematic exposure", "documented mandate", "sizing scenarios"],
+        }
+    return None
+
+
+def _mock_news_api(text):
+    lower = text.lower()
+    if not any(term in lower for term in ("news", "happened", "last week", "headline", "market", "nearly went under", "latest", "today")):
+        return None
+    if any(term in lower for term in ("bank", "went under", "regional")):
+        items = [
+            {"title": "Market event monitor", "text": "Simulated news retrieval flags renewed volatility around a US regional bank; exposure screening is more relevant than the headline alone."},
+            {"title": "Client relevance", "text": "The client record shows no US regional-bank or material single-bank credit exposure."},
+        ]
+        highlights = ["US regional bank", "exposure screening", "no US regional-bank"]
+        query = "US regional-bank volatility and client relevance"
+        cue = "No US regional-bank exposure is recorded. Treat this as an exposure check, not a direct portfolio risk."
+        answer_terms = ["exposure", "portfolio risk"]
+    elif "gold" in lower:
+        items = [
+            {"title": "Commodities monitor", "text": "Simulated news retrieval shows elevated gold coverage, but it does not provide the client's verified live performance."},
+            {"title": "Required check", "text": "Pull the current position valuation and contribution from the portfolio system before answering performance."},
+        ]
+        highlights = ["gold coverage", "verified live performance", "current position valuation"]
+        query = "Gold headlines and portfolio-performance relevance"
+        cue = "Gold headlines do not establish client performance. Pull current valuation and portfolio contribution before answering."
+        answer_terms = ["performance", "valuation", "portfolio contribution"]
+    else:
+        items = [
+            {"title": "Market news monitor", "text": "Simulated news retrieval found a developing market event; confirm affected issuers, sectors and timing before relating it to this client."},
+            {"title": "Relevance check", "text": "Cross-check the event against verified holdings and avoid turning a generic headline into a portfolio claim."},
+        ]
+        highlights = ["affected issuers", "verified holdings", "generic headline"]
+        query = "Current market event and client exposure"
+        cue = "Confirm affected issuers and timing, then cross-check verified holdings before relating the event to this client."
+        answer_terms = ["issuers", "timing", "holdings"]
+    return {
+        "type": "news_api",
+        "label": "News API",
+        "title": "Market News Monitor",
+        "status": "Simulated live retrieval",
+        "query": query,
+        "cue": cue,
+        "answer_terms": answer_terms,
+        "items": items,
+        "highlights": highlights,
+    }
+
+
+def _knowledge_sources(text, profile):
+    facts = _selected_profile_facts(text)
+    sources = []
+    if facts:
+        sources.append(
+            {
+                "type": "clm",
+                "label": "CLM",
+                "title": "Client record match",
+                "status": "Relevant profile context",
+                "query": text.strip(),
+                "items": [{"title": "Matched context", "text": fact} for fact in facts],
+                "highlights": _highlight_terms(text),
+            }
+        )
+
+    if _has_question(text):
+        bank = _mock_bank_api(text)
+        news = _mock_news_api(text)
+        if bank:
+            sources.append(bank)
+        if news:
+            sources.append(news)
+
+    source_types = {source["type"] for source in sources}
+    active_source = "news_api" if "news_api" in source_types else "bank_api" if "bank_api" in source_types else "clm"
+    return sources, active_source
+
+
+def _conversation_messages(profile, turns, history, knowledge_sources):
     messages = [{"role": "system", "content": GI_SYSTEM_PROMPT.strip()}]
     profile_markdown = profile.get("profile_markdown") or DEMO_CLM_PROFILE["profile_markdown"]
     messages.append(
@@ -195,6 +355,22 @@ def _conversation_messages(profile, turns, history):
         relevant_context = ""
         if facts:
             relevant_context = "RELEVANT PROFILE FACTS FOR THIS TURN:\n- " + "\n- ".join(facts) + "\n\n"
+        if index == latest_index:
+            api_lines = []
+            for source in knowledge_sources:
+                if source["type"] == "clm":
+                    continue
+                api_lines.extend(f"{source['label']} / {item['title']}: {item['text']}" for item in source["items"])
+            if api_lines:
+                relevant_context += "RETRIEVED KNOWLEDGE FOR THIS TURN:\n- " + "\n- ".join(api_lines) + "\n\n"
+                relevant_context += (
+                    "QUESTION HANDLING FOR THIS TURN:\n"
+                    "The client asked an answerable question. Give the RM one concise card that answers it "
+                    "using the retrieved knowledge and its client-specific caveat. Do not output [SILENT] "
+                    "when the retrieved source provides a useful answer. Use only facts explicitly present in "
+                    "RETRIEVED KNOWLEDGE or RELEVANT PROFILE FACTS. Never add a percentage, limit, allocation, "
+                    "eligibility claim or figure that is not explicitly present there.\n\n"
+                )
         messages.append(
             {
                 "role": "user",
@@ -231,6 +407,19 @@ def _safe_card(category, text):
     if any(term in lower for term in ("guaranteed return", "guarantee a return", "definitely buy")):
         return False
     return category in {"RECALL", "DATA", "FLAG", "OPPORTUNITY"}
+
+
+def _numbers_are_grounded(text, knowledge_sources):
+    tokens = re.findall(r"\b\d+(?:[.,]\d+)?%?\b", text)
+    if not tokens:
+        return True
+    corpus = json.dumps(knowledge_sources, ensure_ascii=False).lower()
+    return all(token.lower() in corpus for token in tokens)
+
+
+def _answers_retrieved_question(text, api_sources):
+    lower = text.lower()
+    return any(term.lower() in lower for term in api_sources[0].get("answer_terms", []))
 
 
 def _trim_card(text, limit=22):
@@ -312,26 +501,7 @@ def _has_question(text):
     return "?" in text or any(part.strip().startswith(starters) for part in lower.split("."))
 
 
-def _is_complex_question(turn):
-    if turn.get("role") != "client" or not _has_question(turn.get("text", "")):
-        return False
-    terms = (
-        "private credit",
-        "estate",
-        "inherit",
-        "succession",
-        "tax",
-        "cross-border",
-        "foundation",
-        "allocation",
-        "structured",
-        "liquidity",
-    )
-    lower = turn.get("text", "").lower()
-    return any(term in lower for term in terms)
-
-
-def steer_turn(profile, turns, history, allow_big_model):
+def steer_turn(profile, turns, history):
     start = time.perf_counter()
     if not turns:
         return {
@@ -340,6 +510,9 @@ def steer_turn(profile, turns, history, allow_big_model):
             "output": "[SILENT]",
             "model_source": "idle",
             "latency_ms": 0,
+            "knowledge_sources": [],
+            "knowledge_route": [],
+            "active_source": None,
         }
 
     latest = turns[-1]
@@ -352,9 +525,13 @@ def steer_turn(profile, turns, history, allow_big_model):
             "latency_ms": max(1, int((time.perf_counter() - start) * 1000)),
             "turn_index": len(turns) - 1,
             "routed": False,
+            "knowledge_sources": [],
+            "knowledge_route": [],
+            "active_source": None,
         }
 
-    messages = _conversation_messages(profile, turns, history)
+    knowledge_sources, active_source = _knowledge_sources(latest.get("text", ""), profile)
+    messages = _conversation_messages(profile, turns, history, knowledge_sources)
     model_source = f"local:{LOCAL_MODEL}"
     route_error = ""
     try:
@@ -366,20 +543,36 @@ def steer_turn(profile, turns, history, allow_big_model):
 
     parsed = _parse_steering(raw_output, history, latest)
 
-    if allow_big_model and _is_complex_question(latest):
-        try:
-            deepseek_output = _call_deepseek_text(messages)
-            deepseek_parsed = _parse_steering(deepseek_output, history, latest)
-            parsed = deepseek_parsed
-            model_source = f"{model_source} + deepseek"
-            route_error = ""
-        except Exception as exc:
-            route_error = str(exc)
+    if knowledge_sources:
+        api_sources = [source for source in knowledge_sources if source["type"] != "clm"]
+        parsed["cards"] = [
+            card
+            for card in parsed["cards"]
+            if _numbers_are_grounded(card["text"], knowledge_sources)
+            and (not api_sources or _answers_retrieved_question(card["text"], api_sources))
+        ]
+        if not parsed["cards"] and api_sources:
+            parsed["cards"] = [{"category": "DATA", "text": api_sources[0]["cue"]}]
+        if parsed["cards"]:
+            parsed["silent"] = False
+            parsed["output"] = "\n".join(
+                f"[{card['category']}] {card['text']}" for card in parsed["cards"]
+            )
+        else:
+            parsed["silent"] = True
+            parsed["output"] = "[SILENT]"
+
+    source_labels = [source["label"] for source in knowledge_sources]
+    for card in parsed["cards"]:
+        card["sources"] = source_labels[:2] or ["Conversation"]
 
     parsed["model_source"] = model_source
     parsed["latency_ms"] = max(1, int((time.perf_counter() - start) * 1000))
     parsed["turn_index"] = len(turns) - 1
-    parsed["routed"] = allow_big_model and _is_complex_question(latest)
+    parsed["routed"] = bool(knowledge_sources)
+    parsed["knowledge_sources"] = knowledge_sources
+    parsed["knowledge_route"] = [source["type"] for source in knowledge_sources]
+    parsed["active_source"] = active_source if knowledge_sources else None
     if route_error:
         parsed["route_error"] = route_error
     return parsed
@@ -460,7 +653,6 @@ class Handler(SimpleHTTPRequestHandler):
                     body.get("clmProfile") or DEMO_CLM_PROFILE,
                     turns,
                     body.get("history") or [],
-                    bool(body.get("allowBigModel", False)),
                 )
                 _json_response(self, result)
             except Exception as exc:
