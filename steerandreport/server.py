@@ -89,6 +89,7 @@ def _call_ollama_text(messages, temperature=0.05, max_tokens=110):
     request_body = {
         "model": LOCAL_MODEL,
         "stream": False,
+        "think": False,
         "keep_alive": "10m",
         "options": {"temperature": temperature, "num_predict": max_tokens},
         "messages": messages,
