@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conversation Report</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="report-page-body">
+    <header class="app-chrome">
+      <div class="chrome-context">
+        <p class="kicker">Private Banking Intelligence</p>
+        <h1>Conversation Report</h1>
+      </div>
+      <a class="brand-wordmark" href="/" aria-label="Julius Bar home">Julius Bär</a>
+      <div class="top-actions">
+        <button id="uploadReportBtn" class="button button-secondary" type="button" aria-label="Upload report to the JB internal database">Upload</button>
+        <button id="downloadReportBtn" class="button button-secondary" type="button">Download PDF</button>
+        <label class="mode-toggle">
+          <span>Use DeepSeek</span>
+          <input id="reportModeToggle" type="checkbox" checked />
+        </label>
+        <button id="generateReportBtn" class="button button-primary" type="button">Generate</button>
+      </div>
+    </header>
+
+    <main class="report-page">
+      <div class="report-shell">
+        <div class="print-header" aria-hidden="true">
+          <span>Julius Bär</span>
+          <small>Private Banking Intelligence</small>
+        </div>
+        <div class="report-actions">
+          <div>
+            <p class="kicker">Post-call workflow</p>
+            <h2>RM Action Pack</h2>
+          </div>
+          <a class="button button-secondary link-button" href="/">Back to live steering</a>
+        </div>
+        <div id="reportStatus" class="stream-meta report-status">
+          <div>
+            <span class="meta-label">Status</span>
+            <span>Ready to generate a full report from the recorded live transcript and CLM profile.</span>
+          </div>
+        </div>
+        <div id="report" class="report-grid"></div>
+      </div>
+    </main>
+
+    <script src="/report.js"></script>
+  </body>
+</html>

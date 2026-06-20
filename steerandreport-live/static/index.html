@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>During the Call</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="live-page">
+    <header class="app-chrome">
+      <div class="chrome-context">
+        <p class="kicker">Private Banking Intelligence</p>
+        <h1>During the Call</h1>
+      </div>
+      <a class="brand-wordmark" href="/" aria-label="Julius Bar home">Julius Bär</a>
+      <div class="top-actions">
+        <button id="simulateBtn" class="button button-secondary" type="button">Start call</button>
+        <button id="runBtn" class="button button-primary" type="button">Open report</button>
+      </div>
+    </header>
+
+    <main class="workbench">
+      <section class="workspace-column transcript-column" aria-labelledby="live-title">
+        <div class="column-head">
+          <div>
+            <p class="kicker">Live transcript</p>
+            <h2 id="live-title">Call stream</h2>
+          </div>
+          <span id="streamStatus" class="status-chip">Ready</span>
+        </div>
+
+        <div class="teleprompter">
+          <div id="transcript" class="transcript-stream" aria-live="polite"></div>
+          <span class="caret" aria-hidden="true"></span>
+        </div>
+
+        <div class="column-footer">
+          <div>
+            <span class="meta-label">Turn</span>
+            <strong id="turnCounter">0 / 0</strong>
+          </div>
+          <div class="footer-right">
+            <span class="meta-label">Latency</span>
+            <strong id="latencyBadge">0 ms</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace-column steering-column" aria-labelledby="steering-title">
+        <div class="column-head steering-head">
+          <div>
+            <h2 id="steering-title">RM guidance</h2>
+          </div>
+          <div class="model-status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="modelLine">Idle</span>
+          </div>
+        </div>
+
+        <div id="steeringEmpty" class="steering-empty">
+          <span class="listening-mark" aria-hidden="true"></span>
+          <p>Listening</p>
+        </div>
+        <div id="guidance" class="cue-stage" aria-live="polite"></div>
+      </section>
+
+      <aside class="workspace-column dossier-column" aria-labelledby="client-title">
+        <div class="column-head dossier-head">
+          <div>
+            <p class="kicker">Client context</p>
+            <h2 id="client-title">Andreas Vogel</h2>
+          </div>
+          <div class="rm-label">
+            <span>RM</span>
+            <strong id="rmName">Nicole Brandt</strong>
+          </div>
+        </div>
+
+        <dl id="clmGrid" class="wealth-grid"></dl>
+
+        <div class="dossier-tabs" role="tablist" aria-label="Knowledge sources">
+          <button class="dossier-tab" data-view="bank_api" role="tab" aria-selected="false" type="button">Bank API</button>
+          <button class="dossier-tab" data-view="news_api" role="tab" aria-selected="false" type="button">News API</button>
+          <button class="dossier-tab active" data-view="clm" role="tab" aria-selected="true" type="button">CLM</button>
+        </div>
+
+        <section id="contextView" class="context-view" aria-live="polite">
+          <div id="contextSourceHeader" class="source-header"></div>
+          <div id="contextContent" class="source-content"></div>
+        </section>
+
+        <div class="dossier-boundary">
+          <span class="meta-label">Hard boundary</span>
+          <p id="hardBoundary">Never suggest directly selling the retained Sensoria stake.</p>
+        </div>
+      </aside>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
