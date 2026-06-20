@@ -620,6 +620,7 @@ h2 {
 .report-page-body .app-chrome { position: sticky; top: 0; z-index: 10; }
 .report-page { padding: 44px clamp(24px, 5vw, 80px) 72px; }
 .report-shell { max-width: 1180px; margin: 0 auto; }
+.print-header { display: none; }
 
 .report-actions {
   justify-content: space-between;
@@ -721,4 +722,105 @@ h2 {
     animation-duration: 0.001ms !important;
     transition-duration: 0.001ms !important;
   }
+}
+
+@page {
+  size: A4;
+  margin: 14mm 16mm 16mm;
+}
+
+@media print {
+  html,
+  body,
+  .report-page-body {
+    min-height: auto;
+    background: #ffffff;
+  }
+
+  body {
+    color: var(--navy);
+    font-size: 9.5pt;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .report-page-body .app-chrome,
+  .report-status,
+  .report-actions .link-button {
+    display: none !important;
+  }
+
+  .report-page { padding: 0; }
+  .report-shell { max-width: none; }
+
+  .print-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 9mm;
+    padding-bottom: 4mm;
+    border-bottom: 0.6pt solid #cbd0d8;
+  }
+
+  .print-header span {
+    color: var(--brand-blue);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 20pt;
+    font-weight: 600;
+  }
+
+  .print-header small {
+    color: var(--muted);
+    font-size: 7pt;
+    font-weight: 650;
+    text-transform: uppercase;
+  }
+
+  .report-actions {
+    display: block;
+    margin-bottom: 6mm;
+  }
+
+  .report-actions h2 {
+    font-size: 24pt;
+    line-height: 1.1;
+  }
+
+  .report-grid { display: block; }
+
+  .report-block {
+    break-inside: avoid;
+    margin: 0 0 4mm;
+    padding: 5mm 0;
+    border-top: 0.6pt solid #dfe2e6;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .summary-block {
+    padding-top: 5mm;
+    padding-bottom: 5mm;
+  }
+
+  .summary-block p {
+    max-width: none;
+    font-size: 11pt;
+    line-height: 1.55;
+  }
+
+  .report-block h3 {
+    margin-bottom: 3mm;
+    font-size: 7.5pt;
+  }
+
+  .report-block p,
+  .report-list {
+    color: #34406f;
+    font-size: 9pt;
+    line-height: 1.45;
+    orphans: 3;
+    widows: 3;
+  }
+
+  .report-list { gap: 2mm; }
 }
