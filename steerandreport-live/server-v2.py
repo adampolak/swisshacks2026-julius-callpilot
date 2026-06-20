@@ -1,4 +1,5 @@
 import argparse
+import ast
 import json
 import os
 import re
@@ -30,6 +31,7 @@ LOCAL_MODEL = os.environ.get("LOCAL_STEERING_MODEL", "qwen2.5:1.5b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
 CARD_PATTERN = re.compile(r"^(?:[-*]\s*)?\[(RECALL|DATA|FLAG|OPPORTUNITY)\]\s+(.+)$", re.IGNORECASE)
 LIVE_TRANSCRIBER = DeepgramDuplexTranscriber()
+WRAPPING_QUOTES = "\"'`"
 
 
 def _read_json(handler):
@@ -154,23 +156,60 @@ def _ollama_steering_messages(profile, turns, history):
 
 
 def _is_silent_output(raw_output):
-    normalized = str(raw_output or "").strip()
-    return normalized in {"[SILENT]", "SILENT"}
+    lines = _llm_output_lines(raw_output)
+    if len(lines) != 1:
+        return False
+    return _clean_llm_line(lines[0]) in {"[SILENT]", "SILENT"}
+
+
+def _clean_llm_line(value):
+    text = str(value or "").strip()
+    if text.startswith("```") and text.endswith("```"):
+        text = text.strip("`").strip()
+    while len(text) >= 2 and text[0] in WRAPPING_QUOTES and text[-1] == text[0]:
+        text = text[1:-1].strip()
+    return text
+
+
+def _llm_output_lines(raw_output):
+    raw_text = str(raw_output or "").strip()
+    try:
+        parsed = ast.literal_eval(raw_text)
+    except (SyntaxError, ValueError):
+        parsed = None
+
+    if isinstance(parsed, str):
+        return [_clean_llm_line(parsed)]
+    if isinstance(parsed, (list, tuple)):
+        return [_clean_llm_line(item) for item in parsed]
+
+    lines = []
+    for raw_line in raw_text.splitlines():
+        line = _clean_llm_line(raw_line)
+        if line.startswith("```"):
+            continue
+        if line:
+            lines.append(line)
+    return lines
 
 
 def _parse_llm_cards(raw_output):
     cards = []
-    for raw_line in str(raw_output or "").splitlines():
-        match = CARD_PATTERN.match(raw_line.strip())
+    for line in _llm_output_lines(raw_output):
+        match = CARD_PATTERN.match(line)
         if match:
             cards.append({"category": match.group(1).upper(), "text": match.group(2).strip(), "sources": ["Ollama"]})
     if cards:
         return cards
 
-    text = str(raw_output or "").strip()
+    text = _clean_llm_line(raw_output)
     if not text:
         return []
     return [{"category": "LLM", "text": text, "sources": ["Ollama"]}]
+
+
+def _canonical_card_output(cards):
+    return "\n".join(f"[{card['category']}] {card['text']}" for card in cards)
 
 
 def steer_turn(profile, turns, history):
@@ -197,12 +236,13 @@ def steer_turn(profile, turns, history):
         model_source = "local-unavailable"
         route_error = str(exc)
 
-    output = str(raw_output or "").strip() or "[SILENT]"
+    output = _clean_llm_line(raw_output) or "[SILENT]"
     is_silent = _is_silent_output(output)
+    cards = [] if is_silent else _parse_llm_cards(output)
     parsed = {
         "silent": is_silent,
-        "cards": [] if is_silent else _parse_llm_cards(output),
-        "output": "[SILENT]" if is_silent else output,
+        "cards": cards,
+        "output": "[SILENT]" if is_silent else _canonical_card_output(cards) if cards else output,
         "model_source": model_source,
         "latency_ms": max(1, int((time.perf_counter() - start) * 1000)),
         "turn_index": len(turns) - 1,
