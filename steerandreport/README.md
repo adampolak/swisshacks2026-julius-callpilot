@@ -7,10 +7,21 @@ key stored in `deepseek_api_key.txt`.
 
 ```powershell
 cd steerandreport
-python server.py
+.\start.ps1
 ```
 
-Open `http://127.0.0.1:8000`.
+This starts `server.py`, opens `http://127.0.0.1:8000`, and stops the server
+when the launcher is closed or interrupted.
+
+From Explorer, you can also double-click `start.bat`.
+
+Optional overrides:
+
+```powershell
+.\start.ps1 -Port 8010
+.\start.ps1 -HostName 0.0.0.0 -Port 8000
+.\start.ps1 -NoBrowser
+```
 
 ## Pipeline
 
