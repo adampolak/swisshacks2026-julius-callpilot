@@ -5,7 +5,7 @@ speaker/system audio at the same time and print English transcripts to stdout.
 
 - `transcribe_vosk_duplex.py`: true streaming recognizer using Vosk.
 - `transcribe_whisper_duplex.py`: chunked near-real-time recognizer using
-  `fast-whisper` by default, with an optional `whisper.cpp` CLI backend.
+  `faster-whisper` by default, with an optional `whisper.cpp` CLI backend.
 
 Diagnostics and device selection messages go to stderr. Transcript lines go to
 stdout, so they can be piped into another process.
@@ -57,7 +57,7 @@ curl -LO https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
 unzip vosk-model-small-en-us-0.15.zip
 ```
 
-For fast-whisper:
+For faster-whisper:
 
 ```bash
 pip install -r requirements-whisper.txt
@@ -83,12 +83,14 @@ python3 transcribe_vosk_duplex.py \
   --speaker-device auto
 ```
 
-Run fast-whisper:
+Run faster-whisper on CPU:
 
 ```bash
 python3 transcribe_whisper_duplex.py \
-  --backend fast-whisper \
-  --fast-whisper-model base.en \
+  --backend faster-whisper \
+  --faster-whisper-model /path/to/local/faster-whisper-base.en \
+  --compute-device cpu \
+  --compute-type int8 \
   --speaker-device auto
 ```
 
@@ -115,3 +117,28 @@ Disable one side if needed:
 python3 transcribe_vosk_duplex.py --model ./vosk-model-small-en-us-0.15 --no-speaker
 python3 transcribe_whisper_duplex.py --no-mic --speaker-device "BlackHole"
 ```
+
+## Whisper overlap deduplication
+
+`transcribe_whisper_duplex.py` supports overlapping chunks with
+`--overlap-seconds`. Both Whisper backends deduplicate repeated overlap text by
+default:
+
+- Timestamp dedupe drops segments whose timestamps end inside audio that was
+  already emitted for the same source.
+- Text dedupe keeps a normalized word history per source and removes a repeated
+  prefix when it matches the suffix of prior output.
+
+Example:
+
+```bash
+python3 transcribe_whisper_duplex.py \
+  --backend faster-whisper \
+  --faster-whisper-model /path/to/local/faster-whisper-base.en \
+  --chunk-seconds 4 \
+  --overlap-seconds 1
+```
+
+For `whisper.cpp`, the script now keeps timestamp output enabled so timestamp
+dedupe can work. If you pass `--whispercpp-extra-arg=-nt`, timestamp dedupe will
+not have timestamps and only text dedupe will apply.

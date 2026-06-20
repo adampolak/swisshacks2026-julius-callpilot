@@ -25,7 +25,7 @@ import tempfile
 import threading
 import time
 import wave
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -40,6 +40,28 @@ LOOPBACK_HINTS = (
     "what u hear",
 )
 
+WORD_RE = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)?", re.IGNORECASE)
+WHISPERCPP_TIMESTAMP_RE = re.compile(
+    r"^\[(?P<start>\d{2}:\d{2}:\d{2}(?:[\.,]\d+)?)\s+-->\s+"
+    r"(?P<end>\d{2}:\d{2}:\d{2}(?:[\.,]\d+)?)\]\s*(?P<text>.*)$"
+)
+WHISPERCPP_DIAGNOSTIC_PREFIXES = (
+    "whisper_",
+    "system_info:",
+    "main:",
+    "ggml_",
+    "build:",
+    "print_timings:",
+    "load_time",
+    "mel_time",
+    "sample_time",
+    "encode_time",
+    "decode_time",
+    "batchd_time",
+    "prompt_time",
+    "total_time",
+)
+
 
 @dataclass(frozen=True)
 class Chunk:
@@ -47,6 +69,19 @@ class Chunk:
     audio: Any
     started_at: float
     ended_at: float
+
+
+@dataclass(frozen=True)
+class TranscriptSegment:
+    text: str
+    start: float | None = None
+    end: float | None = None
+
+
+@dataclass
+class SourceDedupeState:
+    recent_words: list[str] = field(default_factory=list)
+    last_audio_end_with_text: float | None = None
 
 
 def eprint(*args: object) -> None:
@@ -188,6 +223,122 @@ def emit(lock: threading.Lock, as_json: bool, chunk: Chunk, result_type: str, te
             print(f"[{timestamp}] {chunk.source}: {text}", flush=True)
 
 
+def normalized_word_spans(text: str) -> list[tuple[str, int, int]]:
+    return [(match.group(0).lower(), match.start(), match.end()) for match in WORD_RE.finditer(text)]
+
+
+def normalized_words(text: str) -> list[str]:
+    return [word for word, _start, _end in normalized_word_spans(text)]
+
+
+def drop_duplicate_prefix(
+    text: str,
+    state: SourceDedupeState,
+    max_prefix_words: int,
+    min_match_words: int,
+) -> str:
+    if max_prefix_words <= 0 or min_match_words <= 0 or not state.recent_words:
+        return text
+
+    current = normalized_word_spans(text)
+    if not current:
+        return text
+
+    current_words = [word for word, _start, _end in current]
+    max_match = min(len(state.recent_words), len(current_words), max_prefix_words)
+    if max_match < min_match_words:
+        return text
+
+    duplicate_words = 0
+    for word_count in range(max_match, min_match_words - 1, -1):
+        if state.recent_words[-word_count:] == current_words[:word_count]:
+            duplicate_words = word_count
+            break
+
+    if duplicate_words == 0:
+        return text
+    if duplicate_words >= len(current):
+        return ""
+
+    cut_position = current[duplicate_words - 1][2]
+    return text[cut_position:].lstrip(" \t\r\n,.;:!?-")
+
+
+def update_text_history(state: SourceDedupeState, text: str, history_words: int) -> None:
+    if history_words <= 0:
+        state.recent_words = []
+        return
+    words = normalized_words(text)
+    if words:
+        state.recent_words = (state.recent_words + words)[-history_words:]
+
+
+def trim_segments_by_timestamp(
+    chunk: Chunk,
+    segments: list[TranscriptSegment],
+    state: SourceDedupeState,
+    margin_seconds: float,
+) -> list[TranscriptSegment]:
+    if state.last_audio_end_with_text is None:
+        return segments
+
+    kept: list[TranscriptSegment] = []
+    trim_before = state.last_audio_end_with_text + margin_seconds
+    for segment in segments:
+        if segment.end is None:
+            kept.append(segment)
+            continue
+        absolute_end = chunk.started_at + segment.end
+        if absolute_end > trim_before:
+            kept.append(segment)
+    return kept
+
+
+def segments_to_text(segments: list[TranscriptSegment]) -> str:
+    return " ".join(segment.text.strip() for segment in segments if segment.text.strip())
+
+
+def max_segment_audio_end(chunk: Chunk, segments: list[TranscriptSegment]) -> float:
+    timestamped_ends = [chunk.started_at + segment.end for segment in segments if segment.end is not None]
+    if timestamped_ends:
+        return max(timestamped_ends)
+    return chunk.ended_at
+
+
+def dedupe_and_emit_segments(
+    output_lock: threading.Lock,
+    as_json: bool,
+    chunk: Chunk,
+    segments: list[TranscriptSegment],
+    state: SourceDedupeState,
+    timestamp_dedupe: bool,
+    timestamp_margin_seconds: float,
+    text_dedupe: bool,
+    dedupe_history_words: int,
+    dedupe_max_prefix_words: int,
+    dedupe_min_match_words: int,
+) -> None:
+    usable_segments = [segment for segment in segments if segment.text.strip()]
+    if timestamp_dedupe:
+        usable_segments = trim_segments_by_timestamp(chunk, usable_segments, state, timestamp_margin_seconds)
+
+    text = segments_to_text(usable_segments)
+    if text_dedupe:
+        text = drop_duplicate_prefix(text, state, dedupe_max_prefix_words, dedupe_min_match_words)
+    text = " ".join(text.split())
+    if not text:
+        return
+
+    emit(output_lock, as_json, chunk, "final", text)
+    update_text_history(state, text, dedupe_history_words)
+
+    audio_end = max_segment_audio_end(chunk, usable_segments)
+    if state.last_audio_end_with_text is None:
+        state.last_audio_end_with_text = audio_end
+    else:
+        state.last_audio_end_with_text = max(state.last_audio_end_with_text, audio_end)
+
+
 def mono_pcm16_bytes(np: Any, indata: Any, capture_sample_rate: int, target_sample_rate: int) -> bytes:
     if indata.ndim == 1:
         mono = indata.astype(np.float32)
@@ -312,7 +463,15 @@ def faster_whisper_worker(
     model: Any,
     beam_size: int,
     vad_filter: bool,
+    timestamp_dedupe: bool,
+    timestamp_margin_seconds: float,
+    text_dedupe: bool,
+    dedupe_history_words: int,
+    dedupe_max_prefix_words: int,
+    dedupe_min_match_words: int,
 ) -> None:
+    states: dict[str, SourceDedupeState] = {}
+
     while not stop_event.is_set() or not transcription_queue.empty():
         try:
             chunk = transcription_queue.get(timeout=0.2)
@@ -329,8 +488,24 @@ def faster_whisper_worker(
             vad_filter=vad_filter,
             condition_on_previous_text=False,
         )
-        text = " ".join(segment.text.strip() for segment in segments if segment.text.strip())
-        emit(output_lock, as_json, chunk, "final", text)
+        transcript_segments = [
+            TranscriptSegment(text=segment.text, start=float(segment.start), end=float(segment.end))
+            for segment in segments
+        ]
+        state = states.setdefault(chunk.source, SourceDedupeState())
+        dedupe_and_emit_segments(
+            output_lock,
+            as_json,
+            chunk,
+            transcript_segments,
+            state,
+            timestamp_dedupe,
+            timestamp_margin_seconds,
+            text_dedupe,
+            dedupe_history_words,
+            dedupe_max_prefix_words,
+            dedupe_min_match_words,
+        )
 
 
 def write_wav(path: str, audio: Any, sample_rate: int) -> None:
@@ -343,18 +518,51 @@ def write_wav(path: str, audio: Any, sample_rate: int) -> None:
         wav_file.writeframes(pcm.tobytes())
 
 
-def clean_whispercpp_output(raw_output: str) -> str:
-    lines: list[str] = []
+def timestamp_to_seconds(value: str) -> float:
+    time_part, separator, fraction = value.replace(",", ".").partition(".")
+    hours_text, minutes_text, seconds_text = time_part.split(":")
+    seconds = int(hours_text) * 3600 + int(minutes_text) * 60 + int(seconds_text)
+    if separator:
+        seconds += float(f"0.{fraction}")
+    return seconds
+
+
+def is_whispercpp_diagnostic(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return True
+    return stripped.startswith(WHISPERCPP_DIAGNOSTIC_PREFIXES)
+
+
+def parse_whispercpp_segments(raw_output: str) -> list[TranscriptSegment]:
+    segments: list[TranscriptSegment] = []
+    untimestamped_lines: list[str] = []
+
     for line in raw_output.splitlines():
         stripped = line.strip()
-        if not stripped:
+        if is_whispercpp_diagnostic(stripped):
             continue
-        if stripped.startswith(("whisper_", "system_info:", "main:", "ggml_", "build:")):
+
+        match = WHISPERCPP_TIMESTAMP_RE.match(stripped)
+        if match:
+            segments.append(
+                TranscriptSegment(
+                    text=match.group("text"),
+                    start=timestamp_to_seconds(match.group("start")),
+                    end=timestamp_to_seconds(match.group("end")),
+                )
+            )
             continue
-        stripped = re.sub(r"^\[[^\]]+\]\s*", "", stripped)
-        if stripped:
-            lines.append(stripped)
-    return " ".join(lines)
+
+        cleaned = re.sub(r"^\[[^\]]+\]\s*", "", stripped)
+        if cleaned:
+            untimestamped_lines.append(cleaned)
+
+    if segments:
+        return segments
+    if untimestamped_lines:
+        return [TranscriptSegment(text=" ".join(untimestamped_lines))]
+    return []
 
 
 def whispercpp_worker(
@@ -366,7 +574,15 @@ def whispercpp_worker(
     binary: str,
     model_path: str,
     extra_args: list[str],
+    timestamp_dedupe: bool,
+    timestamp_margin_seconds: float,
+    text_dedupe: bool,
+    dedupe_history_words: int,
+    dedupe_max_prefix_words: int,
+    dedupe_min_match_words: int,
 ) -> None:
+    states: dict[str, SourceDedupeState] = {}
+
     while not stop_event.is_set() or not transcription_queue.empty():
         try:
             chunk = transcription_queue.get(timeout=0.2)
@@ -388,15 +604,27 @@ def whispercpp_worker(
                 wav_path,
                 "-l",
                 "en",
-                "-nt",
             ]
             command.extend(extra_args)
             completed = subprocess.run(command, capture_output=True, text=True, check=False)
             if completed.returncode != 0:
                 eprint(f"whisper.cpp failed with exit code {completed.returncode}: {completed.stderr.strip()}")
                 continue
-            text = clean_whispercpp_output(completed.stdout)
-            emit(output_lock, as_json, chunk, "final", text)
+            transcript_segments = parse_whispercpp_segments(completed.stdout)
+            state = states.setdefault(chunk.source, SourceDedupeState())
+            dedupe_and_emit_segments(
+                output_lock,
+                as_json,
+                chunk,
+                transcript_segments,
+                state,
+                timestamp_dedupe,
+                timestamp_margin_seconds,
+                text_dedupe,
+                dedupe_history_words,
+                dedupe_max_prefix_words,
+                dedupe_min_match_words,
+            )
         finally:
             if wav_path:
                 try:
@@ -436,6 +664,40 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-speaker", action="store_true", help="Do not capture speaker/system audio.")
     parser.add_argument("--json", action="store_true", help="Emit JSON lines instead of plain text.")
     parser.add_argument("--backlog", type=int, default=8, help="Maximum queued chunks waiting for transcription.")
+    parser.add_argument(
+        "--no-timestamp-dedupe",
+        action="store_true",
+        help="Disable timestamp-based overlap trimming.",
+    )
+    parser.add_argument(
+        "--timestamp-dedupe-margin",
+        type=float,
+        default=0.2,
+        help="Seconds of tolerance when dropping timestamped overlap text.",
+    )
+    parser.add_argument(
+        "--no-text-dedupe",
+        action="store_true",
+        help="Disable normalized suffix/prefix text deduplication.",
+    )
+    parser.add_argument(
+        "--dedupe-history-words",
+        type=int,
+        default=80,
+        help="Number of previously emitted normalized words kept per source.",
+    )
+    parser.add_argument(
+        "--dedupe-max-prefix-words",
+        type=int,
+        default=40,
+        help="Maximum current prefix length checked against previous output.",
+    )
+    parser.add_argument(
+        "--dedupe-min-match-words",
+        type=int,
+        default=3,
+        help="Minimum repeated word count required before text is removed.",
+    )
 
     parser.add_argument("--faster-whisper-model", default="base.en", help="faster-whisper model name or local path.")
     parser.add_argument("--compute-device", default="cpu", help="faster-whisper compute device, e.g. cpu or cuda.")
@@ -472,6 +734,14 @@ def main() -> int:
         raise SystemExit("--chunk-seconds must be greater than zero.")
     if args.overlap_seconds < 0:
         raise SystemExit("--overlap-seconds cannot be negative.")
+    if args.timestamp_dedupe_margin < 0:
+        raise SystemExit("--timestamp-dedupe-margin cannot be negative.")
+    if args.dedupe_history_words < 0:
+        raise SystemExit("--dedupe-history-words cannot be negative.")
+    if args.dedupe_max_prefix_words < 0:
+        raise SystemExit("--dedupe-max-prefix-words cannot be negative.")
+    if args.dedupe_min_match_words < 1:
+        raise SystemExit("--dedupe-min-match-words must be at least 1.")
     if args.backend == "whispercpp" and not args.whispercpp_model:
         raise SystemExit("The whisper.cpp backend requires --whispercpp-model or WHISPERCPP_MODEL.")
 
@@ -509,7 +779,7 @@ def main() -> int:
             compute_type=args.compute_type,
             cpu_threads=args.cpu_threads,
         )
-        print("faster-whisper model loaded.")
+        eprint("faster-whisper model loaded.")
         worker = threading.Thread(
             target=faster_whisper_worker,
             args=(
@@ -520,6 +790,12 @@ def main() -> int:
                 whisper_model,
                 args.beam_size,
                 not args.no_vad,
+                not args.no_timestamp_dedupe,
+                args.timestamp_dedupe_margin,
+                not args.no_text_dedupe,
+                args.dedupe_history_words,
+                args.dedupe_max_prefix_words,
+                args.dedupe_min_match_words,
             ),
             daemon=True,
         )
@@ -540,6 +816,12 @@ def main() -> int:
                 whispercpp_binary,
                 args.whispercpp_model,
                 args.whispercpp_extra_arg,
+                not args.no_timestamp_dedupe,
+                args.timestamp_dedupe_margin,
+                not args.no_text_dedupe,
+                args.dedupe_history_words,
+                args.dedupe_max_prefix_words,
+                args.dedupe_min_match_words,
             ),
             daemon=True,
         )
