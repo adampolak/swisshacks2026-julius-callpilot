@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+
+deepseek_api_key.txt
+
+.playwright-cli/
+output/
+
+*.log
+.DS_Store
+Thumbs.db
