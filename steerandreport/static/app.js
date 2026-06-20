@@ -6,18 +6,15 @@ const state = {
   steeringQueue: Promise.resolve(),
   lastRenderedTurn: -1,
   currentTranscriptText: null,
-  activeGuidanceShownAt: 0,
-  pendingGuidance: null,
-  guidanceSwapTimer: null,
-  guidanceTransitionTimer: null,
-  guidanceTransitioning: false,
+  guidanceCards: [],
+  guidanceSeq: 0,
   activeContextView: "clm",
   sourcePanels: { bank_api: null, news_api: null },
   contextHighlights: { bank_api: [], news_api: [], clm: [] },
 };
 
-const MIN_GUIDANCE_MS = 10000;
-const GUIDANCE_EXIT_MS = 420;
+const MAX_VISIBLE_CUES = 3;
+const MAX_GUIDANCE_HISTORY = 12;
 
 const els = {
   clmGrid: document.querySelector("#clmGrid"),
@@ -223,53 +220,84 @@ function updateSteeringStatus(result) {
   els.latencyBadge.textContent = `${result.latency_ms || 0} ms`;
 }
 
-function renderCueCards(result) {
+function guidanceSignature(card) {
+  const source = (card.sources || ["Conversation"]).join(" / ");
+  return [card.category, source, card.text].join("::").toLowerCase();
+}
+
+function cueCardMarkup(item, index) {
+  const card = item.card;
+  const source = (card.sources || ["Conversation"]).join(" / ");
+  return `
+    <article class="cue-card cue-${card.category.toLowerCase()} ${item.isNew ? "is-new" : ""}" data-cue-id="${item.id}">
+      <div class="cue-meta">
+        <span>${escapeHtml(card.category)}</span>
+        <span class="cue-source">${escapeHtml(source)} · ${String(index + 1).padStart(2, "0")}</span>
+      </div>
+      <p>${escapeHtml(card.text)}</p>
+    </article>
+  `;
+}
+
+function animateGuidanceShift(previousRects) {
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reducedMotion) return;
+
+  els.guidance.querySelectorAll(".cue-card").forEach((node) => {
+    const previous = previousRects.get(node.dataset.cueId);
+    if (!previous) return;
+    const current = node.getBoundingClientRect();
+    const deltaY = previous.top - current.top;
+    if (Math.abs(deltaY) < 1) return;
+    node.animate(
+      [
+        { transform: `translateY(${deltaY}px)` },
+        { transform: "translateY(0)" },
+      ],
+      { duration: 260, easing: "cubic-bezier(.2, .72, .18, 1)" }
+    );
+  });
+}
+
+function renderGuidanceStack() {
+  els.steeringEmpty.hidden = state.guidanceCards.length > 0;
+  els.guidance.classList.toggle("has-cues", state.guidanceCards.length > 0);
+  els.guidance.innerHTML = state.guidanceCards.map(cueCardMarkup).join("");
+  els.guidance.style.setProperty("--visible-cues", String(Math.min(MAX_VISIBLE_CUES, state.guidanceCards.length || 1)));
+}
+
+function prependCueCards(result) {
   const cards = (result.cards || []).slice(0, 2);
   updateKnowledgePanels(result);
-  els.steeringEmpty.hidden = cards.length > 0;
-  els.guidance.classList.toggle("has-cues", cards.length > 0);
-  els.guidance.classList.remove("is-exiting");
-  els.guidance.innerHTML = cards
-    .map((card, index) => {
-      const source = (card.sources || ["Conversation"]).join(" / ");
-      return `
-        <article class="cue-card cue-${card.category.toLowerCase()}">
-          <div class="cue-meta">
-            <span>${escapeHtml(card.category)}</span>
-            <span class="cue-source">${escapeHtml(source)} · 0${index + 1}</span>
-          </div>
-          <p>${escapeHtml(card.text)}</p>
-        </article>
-      `;
+  if (!cards.length) return;
+
+  const previousRects = new Map(
+    Array.from(els.guidance.querySelectorAll(".cue-card"), (node) => [node.dataset.cueId, node.getBoundingClientRect()])
+  );
+  const existingSignatures = new Set(state.guidanceCards.map((item) => item.signature));
+  const nextSignatures = new Set();
+  const newItems = cards
+    .map((card) => ({ card, signature: guidanceSignature(card) }))
+    .filter((item) => {
+      if (existingSignatures.has(item.signature) || nextSignatures.has(item.signature)) return false;
+      nextSignatures.add(item.signature);
+      return true;
     })
-    .join("");
-  state.activeGuidanceShownAt = cards.length ? performance.now() : 0;
-}
+    .map((item) => ({
+      ...item,
+      id: `cue-${Date.now()}-${state.guidanceSeq++}`,
+      isNew: true,
+    }));
 
-function finishGuidanceSwap() {
-  const next = state.pendingGuidance;
-  state.pendingGuidance = null;
-  state.guidanceTransitioning = false;
-  state.guidanceTransitionTimer = null;
-  if (next) renderCueCards(next);
-}
+  if (!newItems.length) return;
 
-function beginGuidanceSwap() {
-  if (state.guidanceTransitioning || !state.pendingGuidance) return;
-  state.guidanceTransitioning = true;
-  els.guidance.classList.add("is-exiting");
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  state.guidanceTransitionTimer = setTimeout(finishGuidanceSwap, reducedMotion ? 0 : GUIDANCE_EXIT_MS);
-}
-
-function scheduleGuidanceSwap() {
-  if (state.guidanceSwapTimer) clearTimeout(state.guidanceSwapTimer);
-  const elapsed = performance.now() - state.activeGuidanceShownAt;
-  const wait = Math.max(0, MIN_GUIDANCE_MS - elapsed);
-  state.guidanceSwapTimer = setTimeout(() => {
-    state.guidanceSwapTimer = null;
-    beginGuidanceSwap();
-  }, wait);
+  state.guidanceCards.forEach((item) => {
+    item.isNew = false;
+  });
+  state.guidanceCards = [...newItems, ...state.guidanceCards].slice(0, MAX_GUIDANCE_HISTORY);
+  renderGuidanceStack();
+  animateGuidanceShift(previousRects);
+  els.guidance.scrollTo({ top: 0, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
 function renderSteering(result) {
@@ -280,26 +308,15 @@ function renderSteering(result) {
     return;
   }
 
-  const next = { ...result, cards };
-  if (!state.activeGuidanceShownAt && !state.guidanceTransitioning) {
-    renderCueCards(next);
-    return;
-  }
-
-  state.pendingGuidance = next;
-  scheduleGuidanceSwap();
+  prependCueCards({ ...result, cards });
 }
 
 function clearGuidance() {
-  if (state.guidanceSwapTimer) clearTimeout(state.guidanceSwapTimer);
-  if (state.guidanceTransitionTimer) clearTimeout(state.guidanceTransitionTimer);
-  state.guidanceSwapTimer = null;
-  state.guidanceTransitionTimer = null;
-  state.guidanceTransitioning = false;
-  state.pendingGuidance = null;
-  state.activeGuidanceShownAt = 0;
-  els.guidance.classList.remove("has-cues", "is-exiting");
+  state.guidanceCards = [];
+  state.guidanceSeq = 0;
+  els.guidance.classList.remove("has-cues");
   els.guidance.innerHTML = "";
+  els.guidance.scrollTop = 0;
   els.steeringEmpty.hidden = false;
 }
 

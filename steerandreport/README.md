@@ -7,10 +7,21 @@ key stored in `deepseek_api_key.txt`.
 
 ```powershell
 cd steerandreport
-python server.py
+.\start.ps1
 ```
 
-Open `http://127.0.0.1:8000`.
+This starts `server.py`, opens `http://127.0.0.1:8000`, and stops the server
+when the launcher is closed or interrupted.
+
+From Explorer, you can also double-click `start.bat`.
+
+Optional overrides:
+
+```powershell
+.\start.ps1 -Port 8010
+.\start.ps1 -HostName 0.0.0.0 -Port 8000
+.\start.ps1 -NoBrowser
+```
 
 ## Pipeline
 
@@ -66,9 +77,10 @@ evaluation and is never sent to either model.
 ## Report
 
 `Open Report` opens `/report.html`, a separate page for the slower post-call
-report flow. The Upload control accepts `.txt`, `.md`, and `.json` transcripts;
-JSON may also include a `clmProfile`. DeepSeek remains optional for file-specific
-post-call report generation and is never used by live steering.
+report flow. `Upload` represents sending the current report to the JB internal
+database and is intentionally inert in this prototype. `Download PDF` opens the
+browser's native A4 PDF save flow with a report-only print layout. DeepSeek
+remains optional for post-call report generation and is never used by live steering.
 
 You can also run the pipeline once in the terminal:
 
