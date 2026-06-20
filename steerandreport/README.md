@@ -66,9 +66,10 @@ evaluation and is never sent to either model.
 ## Report
 
 `Open Report` opens `/report.html`, a separate page for the slower post-call
-report flow. The Upload control accepts `.txt`, `.md`, and `.json` transcripts;
-JSON may also include a `clmProfile`. DeepSeek remains optional for file-specific
-post-call report generation and is never used by live steering.
+report flow. `Upload` represents sending the current report to the JB internal
+database and is intentionally inert in this prototype. `Download PDF` opens the
+browser's native A4 PDF save flow with a report-only print layout. DeepSeek
+remains optional for post-call report generation and is never used by live steering.
 
 You can also run the pipeline once in the terminal:
 

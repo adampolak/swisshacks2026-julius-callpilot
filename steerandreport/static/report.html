@@ -15,8 +15,8 @@
       </div>
       <a class="brand-wordmark" href="/" aria-label="Julius Bar home">Julius Bär</a>
       <div class="top-actions">
-        <input id="reportUploadInput" class="visually-hidden" type="file" accept=".txt,.md,.json,text/plain,text/markdown,application/json" />
-        <button id="uploadReportBtn" class="button button-secondary" type="button">Upload</button>
+        <button id="uploadReportBtn" class="button button-secondary" type="button" aria-label="Upload report to the JB internal database">Upload</button>
+        <button id="downloadReportBtn" class="button button-secondary" type="button">Download PDF</button>
         <label class="mode-toggle">
           <span>Use DeepSeek</span>
           <input id="reportModeToggle" type="checkbox" />
@@ -27,6 +27,10 @@
 
     <main class="report-page">
       <div class="report-shell">
+        <div class="print-header" aria-hidden="true">
+          <span>Julius Bär</span>
+          <small>Private Banking Intelligence</small>
+        </div>
         <div class="report-actions">
           <div>
             <p class="kicker">Post-call workflow</p>
