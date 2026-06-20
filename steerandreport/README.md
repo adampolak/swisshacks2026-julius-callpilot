@@ -21,8 +21,8 @@ The prototype uses two core prompt sources:
 
 The three generation rounds are:
 
-1. Turn-based real-time steering. The transcript is visually unattributed, while
-   hidden RM/client turn metadata is retained for handled-point detection.
+1. Turn-based real-time steering with explicit RM/client speaker labels and
+   role-aware handled-point detection.
 2. Full conversation report from the complete transcript and CLM profile.
 3. Refined RM action pack using the draft report, transcript, and CLM profile.
 
@@ -47,8 +47,15 @@ $env:LOCAL_STEERING_MODEL = "qwen2.5:1.5b"
 The local model follows the Gi silence-by-default contract and emits either
 `[SILENT]` or up to two `[RECALL|DATA|FLAG|OPPORTUNITY]` cards. A guardrail layer
 validates card count, length, repetition, gold-performance claims, and the
-Sensoria no-sale boundary. If `DeepSeek route` is enabled, complex business
-questions are escalated while preserving the same output contract.
+Sensoria no-sale boundary.
+
+Live DeepSeek routing is disabled. Answerable business questions retrieve
+simulated internal knowledge from Bank API; event and market-news questions
+retrieve simulated News API context. The local 1.5B model receives that context
+before producing a card. Unsupported figures are rejected, and each card names
+its CLM, Bank API, or News API source. The right dossier switches to the active
+source and highlights the matched sentence while retaining the complete CLM
+record in a dedicated scrollable view.
 
 ## Gi Source Data
 
@@ -59,7 +66,9 @@ evaluation and is never sent to either model.
 ## Report
 
 `Open Report` opens `/report.html`, a separate page for the slower post-call
-report flow. This keeps the live steering workstation uncluttered.
+report flow. The Upload control accepts `.txt`, `.md`, and `.json` transcripts;
+JSON may also include a `clmProfile`. DeepSeek remains optional for file-specific
+post-call report generation and is never used by live steering.
 
 You can also run the pipeline once in the terminal:
 
