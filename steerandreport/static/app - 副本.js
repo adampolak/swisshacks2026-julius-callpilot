@@ -263,7 +263,7 @@ function cueCardMarkup(item, index) {
     <article class="cue-card cue-${card.category.toLowerCase()} ${item.isNew ? "is-new" : ""} ${selected ? "is-selected" : ""}" data-cue-id="${item.id}" role="button" tabindex="0" aria-pressed="${selected}">
       <div class="cue-meta">
         <span>${escapeHtml(card.category)}</span>
-        <span class="cue-source">${escapeHtml(source)} </span>
+        <span class="cue-source">${escapeHtml(source)} · ${String(index + 1).padStart(2, "0")}</span>
       </div>
       <p>${escapeHtml(card.text)}</p>
     </article>
