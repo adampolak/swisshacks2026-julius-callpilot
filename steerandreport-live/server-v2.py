@@ -3,6 +3,7 @@ import ast
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -32,6 +33,12 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
 CARD_PATTERN = re.compile(r"^(?:[-*]\s*)?\[(RECALL|DATA|FLAG|OPPORTUNITY)\]\s+(.+)$", re.IGNORECASE)
 LIVE_TRANSCRIBER = DeepgramDuplexTranscriber()
 WRAPPING_QUOTES = "\"'`"
+LLM_CHAT_LOCK = threading.RLock()
+LLM_CHAT_STATE = {
+    "messages": [],
+    "last_turn_index": -1,
+    "profile_markdown": None,
+}
 
 
 def _read_json(handler):
@@ -117,42 +124,114 @@ def _call_ollama_text(messages, temperature=0.05, max_tokens=110):
     return data.get("message", {}).get("content", "[SILENT]")
 
 
-def _format_transcript(turns):
+def _format_transcript(turns, start_index=0):
     lines = []
-    for index, turn in enumerate(turns):
+    for offset, turn in enumerate(turns):
+        fallback_index = start_index + offset
+        turn_index = int(turn.get("turn_index", fallback_index))
         role = str(turn.get("role", "unknown")).lower()
         label = "RM" if role == "rm" else "Client" if role == "client" else role.upper()
         text = str(turn.get("text", "")).strip()
         if text:
-            lines.append(f"{index + 1}. {label}: {text}")
+            lines.append(f"{turn_index + 1}. {label}: {text}")
     return "\n".join(lines)
 
 
-def _ollama_steering_messages(profile, turns, history):
-    profile_markdown = profile.get("profile_markdown") or DEMO_CLM_PROFILE["profile_markdown"]
-    messages = [
+def _profile_markdown(profile):
+    return profile.get("profile_markdown") or DEMO_CLM_PROFILE["profile_markdown"]
+
+
+def _initial_ollama_messages(profile):
+    return [
         {"role": "system", "content": GI_SYSTEM_PROMPT.strip()},
         {
             "role": "user",
-            "content": "CLIENT PROFILE (ground truth):\n\n" + profile_markdown,
+            "content": (
+                "CLIENT PROFILE (ground truth):\n\n"
+                + _profile_markdown(profile)
+                + "\n\nThe following user messages append only new finalized transcript turns since your previous call."
+            ),
         },
     ]
 
-    prior_outputs = []
-    for item in history:
+
+def _prior_non_silent_outputs(history):
+    outputs = []
+    for item in history or []:
         output = str(item.get("output", "")).strip()
         if output and output != "[SILENT]":
-            prior_outputs.append(output)
-    if prior_outputs:
-        messages.append({"role": "assistant", "content": "\n".join(prior_outputs)})
+            outputs.append(output)
+    return outputs
 
-    messages.append(
-        {
-            "role": "user",
-            "content": "FULL CURRENT TRANSCRIPT:\n\n" + (_format_transcript(turns) or "[No transcript turns yet]"),
-        }
+
+def _reset_ollama_chat_state(profile, history=None, last_turn_index=-1):
+    messages = _initial_ollama_messages(profile)
+    prior_outputs = _prior_non_silent_outputs(history)
+    if prior_outputs:
+        messages.append(
+            {
+                "role": "assistant",
+                "content": "PREVIOUS NON-SILENT STEERING OUTPUTS ALREADY SHOWN:\n" + "\n".join(prior_outputs),
+            }
+        )
+    LLM_CHAT_STATE["messages"] = messages
+    LLM_CHAT_STATE["last_turn_index"] = last_turn_index
+    LLM_CHAT_STATE["profile_markdown"] = _profile_markdown(profile)
+
+
+def _history_last_turn_index(history):
+    indexes = []
+    for item in history or []:
+        try:
+            indexes.append(int(item.get("turn_index", -1)))
+        except (TypeError, ValueError):
+            continue
+    return max(indexes, default=-1)
+
+
+def _ensure_ollama_chat_state(profile, turns, history):
+    latest_index = len(turns) - 1
+    profile_markdown = _profile_markdown(profile)
+    history_last_index = _history_last_turn_index(history)
+    should_reset = (
+        not LLM_CHAT_STATE["messages"]
+        or LLM_CHAT_STATE["profile_markdown"] != profile_markdown
+        or (not history and LLM_CHAT_STATE["last_turn_index"] >= 0)
+        or latest_index < LLM_CHAT_STATE["last_turn_index"]
+        or (history and history_last_index < min(LLM_CHAT_STATE["last_turn_index"], latest_index) - 1)
     )
-    return messages
+    if should_reset:
+        resume_index = history_last_index if history else -1
+        _reset_ollama_chat_state(profile, history=history, last_turn_index=resume_index)
+
+
+def _call_ollama_incremental(profile, turns, history, max_tokens=180):
+    with LLM_CHAT_LOCK:
+        _ensure_ollama_chat_state(profile, turns, history)
+        start_index = LLM_CHAT_STATE["last_turn_index"] + 1
+        new_turns = turns[start_index:]
+        if not new_turns:
+            return "[SILENT]", LLM_CHAT_STATE["last_turn_index"], False
+
+        user_message = {
+            "role": "user",
+            "content": (
+                "NEW TRANSCRIPT TURN(S) SINCE LAST CALL:\n\n"
+                + _format_transcript(new_turns, start_index)
+            ),
+        }
+        messages = LLM_CHAT_STATE["messages"] + [user_message]
+        raw_output = _call_ollama_text(messages, max_tokens=max_tokens)
+        latest_sent_index = len(turns) - 1
+        LLM_CHAT_STATE["messages"] = messages + [{"role": "assistant", "content": str(raw_output or "[SILENT]").strip()}]
+        LLM_CHAT_STATE["last_turn_index"] = latest_sent_index
+        return raw_output, latest_sent_index, True
+
+
+def _replace_last_ollama_assistant_output(output):
+    with LLM_CHAT_LOCK:
+        if LLM_CHAT_STATE["messages"] and LLM_CHAT_STATE["messages"][-1].get("role") == "assistant":
+            LLM_CHAT_STATE["messages"][-1]["content"] = output
 
 
 def _is_silent_output(raw_output):
@@ -226,13 +305,19 @@ def steer_turn(profile, turns, history):
             "active_source": None,
         }
 
-    messages = _ollama_steering_messages(profile, turns, history)
     model_source = f"local:{LOCAL_MODEL}"
     route_error = ""
+    sent_new_transcript = False
     try:
-        raw_output = _call_ollama_text(messages, max_tokens=180)
+        raw_output, sent_turn_index, sent_new_transcript = _call_ollama_incremental(
+            profile,
+            turns,
+            history,
+            max_tokens=180,
+        )
     except Exception as exc:
         raw_output = "[SILENT]"
+        sent_turn_index = len(turns) - 1
         model_source = "local-unavailable"
         route_error = str(exc)
 
@@ -245,12 +330,15 @@ def steer_turn(profile, turns, history):
         "output": "[SILENT]" if is_silent else _canonical_card_output(cards) if cards else output,
         "model_source": model_source,
         "latency_ms": max(1, int((time.perf_counter() - start) * 1000)),
-        "turn_index": len(turns) - 1,
+        "turn_index": sent_turn_index,
         "routed": False,
+        "sent_new_transcript": sent_new_transcript,
         "knowledge_sources": [],
         "knowledge_route": [],
         "active_source": None,
     }
+    if sent_new_transcript and model_source != "local-unavailable":
+        _replace_last_ollama_assistant_output(parsed["output"])
     if route_error:
         parsed["route_error"] = route_error
     return parsed
