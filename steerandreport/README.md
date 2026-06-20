@@ -6,6 +6,7 @@ key stored in `deepseek_api_key.txt`.
 ## Run
 
 ```powershell
+cd steerandreport
 python server.py
 ```
 
@@ -26,8 +27,8 @@ The three generation rounds are:
 3. Refined RM action pack using the draft report, transcript, and CLM profile.
 
 The live transcript simulation renders speech-to-text one character at a time
-without speaker attribution. The stream is slower and smaller than the steering
-surface. Steering appears only when a meaningful window is analyzed.
+with explicit RM and Client attribution. Steering appears only when a complete
+turn contains a meaningful signal.
 
 ## Local Steering Model
 
