@@ -437,42 +437,43 @@ function randomBetween(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// Word-count distribution biased toward 2-3 word chunks.
+const CHUNK_WORD_COUNTS = [1, 2, 2, 3, 3, 3, 4];
+
+// Returns the next natural speech chunk starting at `offset` and the offset
+// that follows it. Chunks hold roughly 1-4 words and prefer to stop at
+// natural punctuation boundaries.
 function nextSpeechChunk(text, offset) {
-  const wordLimit = [1, 2, 2, 3, 3, 3, 4][randomBetween(0, 6)];
-  const tokenPattern = /\s*\S+/g;
-  tokenPattern.lastIndex = offset;
+  const targetWords = CHUNK_WORD_COUNTS[randomBetween(0, CHUNK_WORD_COUNTS.length - 1)];
+  let index = offset;
+  let wordsTaken = 0;
 
-  let nextOffset = offset;
-  let wordCount = 0;
-  while (wordCount < wordLimit) {
-    const match = tokenPattern.exec(text);
-    if (!match) break;
-
-    wordCount += 1;
-    nextOffset = tokenPattern.lastIndex;
-
-    const token = match[0].trimEnd();
-    if (/[.!?]$/.test(token)) break;
-    if (/[,;:]$/.test(token) && wordCount >= 2) break;
+  while (index < text.length && wordsTaken < targetWords) {
+    // Consume one word: any leading whitespace, then non-whitespace.
+    while (index < text.length && /\s/.test(text[index])) index += 1;
+    while (index < text.length && !/\s/.test(text[index])) {
+      index += 1;
+      // Stop early on natural punctuation boundaries.
+      if (/[.,?!;:]/.test(text[index - 1])) {
+        wordsTaken += 1;
+        return { chunk: text.slice(offset, index), nextOffset: index };
+      }
+    }
+    wordsTaken += 1;
   }
 
-  if (nextOffset === offset) {
-    return { chunk: text.slice(offset), nextOffset: text.length };
-  }
-
-  return { chunk: text.slice(offset, nextOffset), nextOffset };
+  return { chunk: text.slice(offset, index), nextOffset: index };
 }
 
+// Decides how long to wait before revealing the chunk after this one,
+// based on its trailing punctuation. Uses the slower, more natural timing.
 function getChunkDelay(chunk) {
-  const text = chunk.trim();
-  if (!text) return randomBetween(180, 280);
-  if (/[.!?]$/.test(text)) return randomBetween(520, 840);
-  if (/[,;:]$/.test(text)) return randomBetween(320, 480);
-
-  const wordCount = text.split(/\s+/).filter(Boolean).length;
-  const min = wordCount > 2 ? 220 : 180;
-  const max = Math.min(360, 280 + wordCount * 20);
-  return randomBetween(min, max);
+  const trimmed = chunk.trim();
+  if (!trimmed) return randomBetween(180, 280);
+  const last = trimmed[trimmed.length - 1];
+  if (/[.?!]/.test(last)) return randomBetween(520, 840);
+  if (/[,;:]/.test(last)) return randomBetween(320, 480);
+  return randomBetween(180, 360);
 }
 
 function typeTurn(turnIndex, offset = 0) {
@@ -497,7 +498,8 @@ function typeTurn(turnIndex, offset = 0) {
   state.currentTranscriptText.textContent += chunk;
   els.transcript.scrollTop = els.transcript.scrollHeight;
 
-  state.streamTimer = setTimeout(() => typeTurn(turnIndex, nextOffset), getChunkDelay(chunk));
+  const delay = getChunkDelay(chunk);
+  state.streamTimer = setTimeout(() => typeTurn(turnIndex, nextOffset), delay);
 }
 
 function simulateLiveFeed() {

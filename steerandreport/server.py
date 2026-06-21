@@ -91,7 +91,7 @@ def _call_ollama_text(messages, temperature=0.05, max_tokens=110):
         "stream": False,
         "think": False,
         "keep_alive": "10m",
-        "options": {"temperature": temperature, "num_predict": max_tokens},
+        "options": {"temperature": temperature, "num_predict": max_tokens, "num_ctx": 10240},
         "messages": messages,
     }
     request = urllib.request.Request(
