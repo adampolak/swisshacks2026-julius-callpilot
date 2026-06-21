@@ -433,7 +433,49 @@ function startTranscriptTurn(turnIndex) {
   state.currentTranscriptText = text;
 }
 
-function typeTurn(turnIndex, charIndex = 0) {
+function randomBetween(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function nextSpeechChunk(text, offset) {
+  const wordLimit = [1, 2, 2, 3, 3, 3, 4][randomBetween(0, 6)];
+  const tokenPattern = /\s*\S+/g;
+  tokenPattern.lastIndex = offset;
+
+  let nextOffset = offset;
+  let wordCount = 0;
+  while (wordCount < wordLimit) {
+    const match = tokenPattern.exec(text);
+    if (!match) break;
+
+    wordCount += 1;
+    nextOffset = tokenPattern.lastIndex;
+
+    const token = match[0].trimEnd();
+    if (/[.!?]$/.test(token)) break;
+    if (/[,;:]$/.test(token) && wordCount >= 2) break;
+  }
+
+  if (nextOffset === offset) {
+    return { chunk: text.slice(offset), nextOffset: text.length };
+  }
+
+  return { chunk: text.slice(offset, nextOffset), nextOffset };
+}
+
+function getChunkDelay(chunk) {
+  const text = chunk.trim();
+  if (!text) return randomBetween(180, 280);
+  if (/[.!?]$/.test(text)) return randomBetween(520, 840);
+  if (/[,;:]$/.test(text)) return randomBetween(320, 480);
+
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  const min = wordCount > 2 ? 220 : 180;
+  const max = Math.min(360, 280 + wordCount * 20);
+  return randomBetween(min, max);
+}
+
+function typeTurn(turnIndex, offset = 0) {
   if (turnIndex >= state.transcript.length) {
     state.streamTimer = null;
     els.simulateBtn.disabled = false;
@@ -443,20 +485,19 @@ function typeTurn(turnIndex, charIndex = 0) {
   }
 
   const text = state.transcript[turnIndex].text;
-  if (charIndex === 0) startTranscriptTurn(turnIndex);
-  if (charIndex >= text.length) {
+  if (offset === 0) startTranscriptTurn(turnIndex);
+  if (offset >= text.length) {
     queueTurnAnalysis(turnIndex);
     els.turnCounter.textContent = `${turnIndex + 1} / ${state.transcript.length}`;
-    state.streamTimer = setTimeout(() => typeTurn(turnIndex + 1, 0), 260);
+    state.streamTimer = setTimeout(() => typeTurn(turnIndex + 1, 0), randomBetween(560, 840));
     return;
   }
 
-  const char = text[charIndex];
-  state.currentTranscriptText.textContent += char;
+  const { chunk, nextOffset } = nextSpeechChunk(text, offset);
+  state.currentTranscriptText.textContent += chunk;
   els.transcript.scrollTop = els.transcript.scrollHeight;
 
-  const delay = /[.?]/.test(char) ? 165 : char === "," ? 85 : char === " " ? 34 : 20;
-  state.streamTimer = setTimeout(() => typeTurn(turnIndex, charIndex + 1), delay);
+  state.streamTimer = setTimeout(() => typeTurn(turnIndex, nextOffset), getChunkDelay(chunk));
 }
 
 function simulateLiveFeed() {
