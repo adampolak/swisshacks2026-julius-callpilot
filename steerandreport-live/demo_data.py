@@ -5,6 +5,7 @@ GI_BUNDLE = load_gi_bundle()
 DEMO_CLM_PROFILE = GI_BUNDLE["profile"]
 DEMO_TRANSCRIPT = GI_BUNDLE["transcript"]
 GI_SYSTEM_PROMPT = GI_BUNDLE["system_prompt"]
+GI_ECONOMIC_CONTEXT = GI_BUNDLE["economic_context"]
 DEMO_STEERING_RULES = []
 
 

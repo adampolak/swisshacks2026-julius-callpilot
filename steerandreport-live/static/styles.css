@@ -419,6 +419,7 @@ h2 {
 
 .cue-recall { border-left-color: var(--gold); }
 .cue-data { border-left-color: var(--client-blue); }
+.cue-context { border-left-color: var(--client-blue); }
 .cue-flag { border-left-color: var(--flag); }
 .cue-opportunity { border-left-color: var(--opportunity); }
 

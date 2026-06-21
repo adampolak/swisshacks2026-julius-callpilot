@@ -15,6 +15,7 @@ from demo_data import (
     DEMO_CLM_PROFILE,
     DEMO_TRANSCRIPT,
     GI_SYSTEM_PROMPT,
+    GI_ECONOMIC_CONTEXT,
     MOCK_ROUND_1,
     MOCK_ROUND_2,
     MOCK_ROUND_3,
@@ -29,7 +30,7 @@ DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 LOCAL_MODEL = os.environ.get("LOCAL_STEERING_MODEL", "qwen2.5:1.5b")
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434/api/chat")
-CARD_PATTERN = re.compile(r"^\[(RECALL|DATA|FLAG|OPPORTUNITY)\]\s+(.+)$", re.IGNORECASE)
+CARD_PATTERN = re.compile(r"^\[(RECALL|DATA|CONTEXT|FLAG|OPPORTUNITY)\]\s+(.+)$", re.IGNORECASE)
 LIVE_TRANSCRIBER = DeepgramDuplexTranscriber()
 
 
@@ -102,7 +103,12 @@ def _call_ollama_text(messages, temperature=0.05, max_tokens=110):
         "stream": False,
         "think": False,
         "keep_alive": "10m",
-        "options": {"temperature": temperature, "num_predict": max_tokens},
+        "options": {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+            "repeat_penalty": 1.3,
+            "repeat_last_n": 256,
+        },
         "messages": messages,
     }
     request = urllib.request.Request(
@@ -356,7 +362,13 @@ def _conversation_messages(profile, turns, history, knowledge_sources):
     messages.append(
         {
             "role": "user",
-            "content": "CLIENT PROFILE (ground truth; not a live-data source):\n\n" + profile_markdown,
+            "content": (
+                "CLIENT PROFILE (ground truth; not a live-data source):\n\n"
+                + profile_markdown
+                + "\n\nMACROECONOMIC CONTEXT (background reference on the global economy; "
+                "not a live-data source — do not quote as current/real-time figures):\n\n"
+                + GI_ECONOMIC_CONTEXT.strip()
+            ),
         }
     )
     prior_outputs = {int(item.get("turn_index", -1)): _history_output(item) for item in history}

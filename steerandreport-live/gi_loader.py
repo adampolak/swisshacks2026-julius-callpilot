@@ -67,9 +67,12 @@ def build_profile(markdown):
     rm_value = _profile_value(markdown, "Relationship manager", "Nicole Brandt")
     relationship_manager = re.split(r"\s*\(RM\)|,", rm_value, maxsplit=1)[0].strip()
 
+    primary_client = _profile_value(markdown, "Name", "Henri Lemaire")
+    client_id = "GI-" + re.sub(r"[^A-Z0-9]+", "-", primary_client.upper()).strip("-")
+
     return {
-        "client_id": "GI-ANDREAS-VOGEL",
-        "primary_client": "Andreas Vogel",
+        "client_id": client_id,
+        "primary_client": primary_client,
         "relationship_manager": relationship_manager,
         "segment": _profile_value(markdown, "Segment", "HNW / UHNW"),
         "jurisdiction": "Switzerland / Italy",
@@ -114,4 +117,5 @@ def load_gi_bundle():
         "transcript_markdown": transcript_markdown,
         "system_prompt": _read("system_prompt.md"),
         "evaluation_key": _read("evaluation_key.md"),
+        "economic_context": _read("economic_context.md"),
     }

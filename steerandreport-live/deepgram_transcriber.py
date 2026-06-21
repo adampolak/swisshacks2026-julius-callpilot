@@ -285,6 +285,7 @@ class DeepgramDuplexTranscriber:
 
     def _handle_message(self, raw):
         msg = json.loads(raw)
+        print(msg)
         if msg.get("type") != "Results":
             return
 
@@ -296,6 +297,8 @@ class DeepgramDuplexTranscriber:
         end = start + float(msg.get("duration", 0.0) or 0.0)
         role = "rm" if channel == 0 else "client"
         speaker = "Relationship Manager" if role == "rm" else "Client"
+
+	
 
         with self._lock:
             if msg.get("is_final"):
