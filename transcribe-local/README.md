@@ -1,9 +1,8 @@
 # Duplex live transcription
 
-This directory contains two Python scripts that capture microphone audio and
-speaker/system audio at the same time and print English transcripts to stdout.
+This directory contains a Python script that captures microphone audio and
+speaker/system audio at the same time and prints English transcripts to stdout.
 
-- `transcribe_vosk_duplex.py`: true streaming recognizer using Vosk.
 - `transcribe_whisper_duplex.py`: chunked near-real-time recognizer using
   `faster-whisper` by default, with an optional `whisper.cpp` CLI backend.
 
@@ -18,7 +17,7 @@ Speaker capture requires an input-like loopback device.
 On Ubuntu with PulseAudio or PipeWire, use the output monitor source. Run:
 
 ```bash
-python3 transcribe_vosk_duplex.py --list-devices
+python3 transcribe_whisper_duplex.py --list-devices
 ```
 
 Look for a device whose name contains `monitor` or `loopback`, then pass its
@@ -49,14 +48,6 @@ python3 -m venv .venv
 . .venv/bin/activate
 ```
 
-For Vosk:
-
-```bash
-pip install -r requirements-vosk.txt
-curl -LO https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip
-unzip vosk-model-small-en-us-0.15.zip
-```
-
 For faster-whisper:
 
 ```bash
@@ -71,16 +62,7 @@ model. Then pass `--backend whispercpp --whispercpp-model /path/to/model.bin`.
 List capture devices:
 
 ```bash
-python3 transcribe_vosk_duplex.py --list-devices
 python3 transcribe_whisper_duplex.py --list-devices
-```
-
-Run Vosk:
-
-```bash
-python3 transcribe_vosk_duplex.py \
-  --model ./vosk-model-small-en-us-0.15 \
-  --speaker-device auto
 ```
 
 Run faster-whisper on CPU:
@@ -107,14 +89,12 @@ python3 transcribe_whisper_duplex.py \
 Machine-readable output:
 
 ```bash
-python3 transcribe_vosk_duplex.py --model ./vosk-model-small-en-us-0.15 --json
 python3 transcribe_whisper_duplex.py --json
 ```
 
 Disable one side if needed:
 
 ```bash
-python3 transcribe_vosk_duplex.py --model ./vosk-model-small-en-us-0.15 --no-speaker
 python3 transcribe_whisper_duplex.py --no-mic --speaker-device "BlackHole"
 ```
 
